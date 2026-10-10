@@ -8,3 +8,6 @@
 backend/.local/
 backend/private-results/
 doc\googledrive
+
+frontend/node_modules/
+frontend/dist/

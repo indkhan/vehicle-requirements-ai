@@ -1,0 +1,149 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #030815b5;
+  backdrop-filter: blur(7px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.dialog {
+  position: relative;
+  background: #f6f7fa;
+  width: min(540px, 100%);
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 32px;
+  border-radius: 4px;
+  box-shadow: 0 30px 100px #0006;
+}
+.dialog h2 {
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -1px;
+  margin: 0 0 10px;
+}
+.dialog > p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #77818e;
+}
+.close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  background: transparent;
+  color: #6a7381;
+  padding: 6px;
+}
+.dialog label.field {
+  font-size: 12px;
+  display: block;
+  margin: 20px 0 10px;
+}
+.dialog select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #cbd1dc;
+  background: #fff;
+}
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0;
+  font-size: 13px;
+}
+.check-field input {
+  accent-color: #526cff;
+  width: 17px;
+  height: 17px;
+}
+.dialog .pill {
+  margin-top: 12px;
+}
+.detail-stats {
+  display: flex;
+  gap: 10px;
+  margin: 25px 0;
+}
+.detail-stats > div {
+  flex: 1;
+  border-top: 1px solid #cfd5df;
+  padding-top: 12px;
+  font-size: 24px;
+}
+.detail-stats small {
+  display: block;
+  font-size: 10px;
+  color: #818b99;
+  margin-top: 6px;
+}
+.dialog blockquote {
+  margin: 18px 0;
+  background: white;
+  padding: 17px;
+  border-left: 2px solid #526cff;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.notice {
+  background: #e8edf9;
+  padding: 12px 15px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #586b95;
+}
+.upload {
+  display: block;
+  border: 1px dashed #a8b5cf;
+  padding: 20px;
+  text-align: center;
+  color: #68768b;
+  font-size: 12px;
+  cursor: pointer;
+}
+.upload input {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  font-size: 11px;
+}
+.upload-error {
+  color: #a94835;
+  font-size: 12px;
+}
+.research {
+  margin-top: 18px;
+  border-top: 1px solid #d8dfe9;
+  padding-top: 12px;
+}
+.research h3 {
+  font-weight: 500;
+  font-size: 15px;
+}
+.research p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #78818e;
+}
+.file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding: 8px 0;
+}
+.file-row button {
+  background: transparent;
+  color: #7b8493;
+}
+.save-hint {
+  font-size: 10px;
+  color: #8893a5;
+  margin-left: 12px;
+}
