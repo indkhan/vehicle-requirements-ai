@@ -949,3 +949,10 @@
 @media(prefers-reduced-motion:reduce){.j-car-scene{display:none;}.j-static-chapter{scroll-margin-top:70px;}}
 
 @media(max-width:760px){.j-copy,.j-copy-left{top:14%;}.journey-root .j-title{font-size:clamp(45px,9.5vw,58px);}.j-title span{display:block;}.j-scene-shade{background:linear-gradient(180deg,#e7e3dd 0%,#e7e3dd 43%,transparent 56%,transparent 80%,#e7e3dd 98%);}}
+/* Keep the whole car inside the studio; the cabin shares the same visual space. */
+.j-scroll-track{height:1100svh}
+.j-cabin-scene{position:absolute;left:46%;right:4%;top:24%;bottom:23%;opacity:0;visibility:hidden;overflow:hidden;border-radius:10px;transform-origin:50% 58%;mask-image:linear-gradient(90deg,transparent,#000 5%,#000 96%,transparent),linear-gradient(0deg,transparent,#000 5%,#000 95%,transparent);mask-composite:intersect}
+.j-car-scene .j-cabin-scene canvas{position:static;display:block;width:100%;height:100%}
+.j-scene-shade{background:linear-gradient(90deg,#e7e3dd 0%,#e7e3dddc 20%,#e7e3dd00 42%),linear-gradient(0deg,#e7e3dd 0%,transparent 12%,transparent 88%,#e7e3dd 100%)}
+@media(max-width:760px){.j-scroll-track{height:1100svh}.j-cabin-scene{left:5%;right:5%;top:48%;bottom:19%;border-radius:6px}.j-scene-shade{background:linear-gradient(180deg,#e7e3dd 0%,#e7e3dd 40%,transparent 49%,transparent 86%,#e7e3dd 98%)}.j-scroll-hint{max-width:160px}}
+@media(max-height:600px) and (min-width:761px){.j-copy{top:18%}.journey-root .j-title{font-size:60px}.j-description{font-size:12px}}

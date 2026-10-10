@@ -1,7 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {ArrowDown,ArrowUpRight,ArrowRight,UserRound} from 'lucide-react';
 import {chapters,models,families} from './journeyData.js';
-import {clamp,storyProgress,dampProgress,journeySample} from './journeyMotion.js';
+import {clamp,storyProgress,dampProgress,journeySample,JOURNEY_END} from './journeyMotion.js';
 import VehicleStage from './VehicleStage.jsx';
 import VehicleViewer from './VehicleViewer.jsx';
 import './journey.css';
@@ -14,22 +14,22 @@ export default function Journey({onOpen}){
  useEffect(()=>{
   if(reduce)return;
   let frame=0,last=0,lastActive=-1,target=0,lastPaint=-1;
-  const measure=()=>{if(!track.current)return;const r=track.current.getBoundingClientRect();target=storyProgress(-r.top,track.current.offsetHeight-window.innerHeight,4);setInCollection(r.bottom<window.innerHeight*.6);};
+  const measure=()=>{if(!track.current)return;const r=track.current.getBoundingClientRect();target=storyProgress(-r.top,track.current.offsetHeight-window.innerHeight,JOURNEY_END+1);setInCollection(r.bottom<window.innerHeight*.6);};
   const tick=time=>{
    const dt=Math.min((time-last)/1000||1/60,.05);last=time;
    progress.current=dampProgress(progress.current,target,dt);
    if(Math.abs(target-progress.current)<.00005)progress.current=target;
    if(lastPaint===progress.current){frame=requestAnimationFrame(tick);return;}lastPaint=progress.current;
-   const sample=journeySample(progress.current),p=progress.current,chapter=clamp(Math.floor(p+.25),0,3);
+   const sample=journeySample(progress.current),p=progress.current,chapter=sample.chapter;
    if(chapter!==lastActive){lastActive=chapter;setActive(chapter);}
    copies.current.forEach((el,i)=>{if(!el)return;const distance=p-i;const opacity=sample.from===sample.to?(i===sample.from?1:0):i===sample.from?1-sample.mix:i===sample.to?sample.mix:0;el.style.opacity=String(opacity);el.style.transform=`translate3d(0,${clamp(distance,-1,1)*-24}px,0)`;el.style.visibility=opacity>.005?'visible':'hidden';el.inert=i!==chapter;});
-   if(line.current)line.current.style.transform=`scaleX(${p/3})`;
+   if(line.current)line.current.style.transform=`scaleX(${p/JOURNEY_END})`;
    frame=requestAnimationFrame(tick);
   };
   measure();frame=requestAnimationFrame(tick);window.addEventListener('scroll',measure,{passive:true});window.addEventListener('resize',measure);
   return()=>{cancelAnimationFrame(frame);window.removeEventListener('scroll',measure);window.removeEventListener('resize',measure);};
  },[reduce]);
- function jump(i){if(reduce){document.getElementById(`static-${chapters[i].id}`)?.scrollIntoView({behavior:'instant'});return;}const el=track.current;if(el)window.scrollTo({top:window.scrollY+el.getBoundingClientRect().top+(el.offsetHeight-window.innerHeight)*i/3,behavior:'smooth'});}
+ function jump(i){if(reduce){document.getElementById(`static-${chapters[i].id}`)?.scrollIntoView({behavior:'instant'});return;}const el=track.current;if(el)window.scrollTo({top:window.scrollY+el.getBoundingClientRect().top+(el.offsetHeight-window.innerHeight)*i/JOURNEY_END,behavior:'smooth'});}
  const current=chapters[active],visible=models.filter(m=>filter==='All'||m.family===filter);
  const copy=(c,i)=>{const Heading=i===0?'h1':'h2';return <><span className="j-eyebrow">{c.eyebrow}</span><Heading className="j-title">{c.title.map(t=><span key={t}>{t}</span>)}</Heading><p className="j-description">{c.description}</p><div className="j-copy-details"><span>{c.id}</span><span>{c.count===1?'Standard model · China':`${c.count} variants · One perspective`}</span></div>{i===0?<button className="j-discover" onClick={()=>jump(1)}><span className="j-round-arrow"><ArrowDown/></span>Scroll to discover</button>:<a className="j-model-link" href="#lineup" onClick={()=>setFilter(c.id)}>Explore {c.id}<ArrowUpRight/></a>}</>};
  return <div className={`journey-root ${inCollection?'j-in-collection':''}`}>
@@ -42,7 +42,7 @@ export default function Journey({onOpen}){
    <div className="j-family-caption"><span>THE {current.id==='F70'?'1':current.id==='G70'?'7':'5'}</span><span>{current.name}<small>{current.id==='G68'?'Long wheelbase · China':'360° perspective'}</small></span></div>
    <button className="j-inspect" onClick={()=>setViewer(current.model)}>Explore in 360° <ArrowUpRight size={12}/></button>
    <nav className="j-chapter-rail" aria-label="Journey chapters">{chapters.map((c,i)=><button key={c.id} aria-label={`Go to ${c.label}`} aria-current={active===i?'step':undefined} className={active===i?'is-current':''} onClick={()=>jump(i)}><span className="j-rail-label">{c.id}</span><span className="j-rail-dot"/></button>)}</nav>
-   <div className="j-stage-footer"><span><UserRound/>{current.person}</span><div className="j-scroll-status"><span>0{active+1}</span><div className="j-progress-track"><i ref={line}/></div><span>04</span></div><span className="j-scroll-hint">{active===3?'Keep scrolling for all 24 variants':'Scroll to turn the perspective'}<ArrowDown/></span></div>
+   <div className="j-stage-footer"><span><UserRound/>{current.person}</span><div className="j-scroll-status"><span>0{active+1}</span><div className="j-progress-track"><i ref={line}/></div><span>04</span></div><span className="j-scroll-hint">{active===3?'Keep scrolling for all 24 variants':'Scroll to turn. Keep going to step inside.'}<ArrowDown/></span></div>
   </div></section>}
   <section className="j-lineup" id="lineup" aria-labelledby="lineup-title"><div className="j-lineup-heading"><div><span className="j-eyebrow">Four families. Every requested perspective.</span><h2 id="lineup-title">ONE PERSON.<br/>24 POSSIBILITIES.</h2></div><p>Choose your starting point. Every variant opens the same requirements workspace, with your selected model in context.</p></div>
   <div className="j-viewer-entry"><button className="j-viewer-link" onClick={()=>setViewer(visible[0].id)}>Explore the collection in 360° ↗</button><button className="j-viewer-link" onClick={()=>setViewer('I20')}>Explore the BMW iX ↗</button></div>

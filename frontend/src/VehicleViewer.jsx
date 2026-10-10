@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
 import {families,models} from './journeyData.js';
 import {loadFrames,frameIndex} from './vehicleFrames.js';
+import {fitImage} from './journeyMotion.js';
 import './vehicleViewer.css';
 const Cabin=lazy(()=>import('./VehicleCabin.jsx'));
 export default function VehicleViewer({initial,onClose}){
@@ -20,7 +21,8 @@ export default function VehicleViewer({initial,onClose}){
  useEffect(()=>{
   if(mode!=='exterior'||!frames.current||!canvas.current)return;
   const el=canvas.current,ctx=el.getContext('2d'),image=frames.current[frameIndex(angle,asset)];
-  ctx.clearRect(0,0,960,540);ctx.drawImage(image,0,0,960,540);el.dataset.angle=String(angle);
+  const box=fitImage(image.width,image.height,{x:24,y:12,width:912,height:516});
+  ctx.clearRect(0,0,960,540);ctx.drawImage(image,box.x,box.y,box.width,box.height);el.dataset.angle=String(angle);
  },[angle,status,asset,mode]);
  const step=(value)=>setAngle(a=>(a+value+360)%360);
  return <dialog ref={dialog} className="v-dialog" onCancel={e=>{e.preventDefault();onClose();}} onClick={e=>{if(e.target===dialog.current)onClose();}} aria-labelledby="v-title">
