@@ -1,8 +1,0 @@
-.env
-.venv
-.local
-private-results
-__pycache__
-.pytest_cache
-.mypy_cache
-.ruff_cache
