@@ -1,0 +1,5 @@
+You are a product manager for building the application backend. The backend plan is already there. You also have the kinds of user files that will be uploaded, which are both Excel files and files that are already in the Google Drive folder. You have to look at those. You have to look at the overall plan and the backend itself because you are going to build the backend, because the frontend is being built by someone else. The only thing that you're building is the backend.
+
+Look at the backend plan and then you have to plan it in epics and stories so that I will have an orchestrator agent that will go one by one and finish the whole building. Try to have fewer epics because we are going to use the Codex GPT-6.1 Soul model, which is really good because we want to finish the building fast. Have all of those things in mind.
+
+First of all tell me the tech stack you are going to use and then tell me the epics and all. Each small thing will have its own commit and then tory a PR and each PR would then be merged into our backend branch.
