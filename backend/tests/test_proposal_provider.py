@@ -241,6 +241,46 @@ def test_proposal_schema_only_contains_closed_objects_with_required_properties()
     check(to_strict_json_schema(Draft))
 
 
+@pytest.mark.parametrize("membership", ["partial", "complete", "fallback"])
+def test_supplied_variants_retain_every_supported_change(client, membership):
+    run_id, generation = ready_run(client)
+    finding = w.Finding.model_validate(
+        aggregate([observation("evidence", "record")], [], run_id)["findings"][0]
+    )
+    change = sample().changes[0].model_dump()
+    change.update(
+        finding_ids=[finding.finding_id],
+        supporting_evidence_ids=["evidence"],
+        scope=w.Scope().model_dump(),
+    )
+    second = {**change, "change_id": "change_b", "requirement_id": "requirement_b"}
+    variant = sample().variants[0].model_dump()
+    variant.update(
+        cohort_ids=[],
+        change_ids=[change["change_id"]]
+        + ([second["change_id"]] if membership == "complete" else []),
+    )
+    draft = Draft.model_validate(
+        {
+            "changes": [change, second],
+            "variants": [] if membership == "fallback" else [variant],
+            "gaps": [],
+        }
+    )
+    if membership == "partial":
+        with pytest.raises(ValueError, match="omit supported changes.*change_b"):
+            validated_draft(draft, [finding], [], run_id, generation)
+    else:
+        result = validated_draft(draft, [finding], [], run_id, generation)
+        assert len(result.changes) == 2
+        if membership == "complete":
+            assert set(result.variants[0].change_ids) == {
+                change.change_id for change in result.changes
+            }
+        else:
+            assert result.variants == []
+
+
 def test_positive_strength_can_support_a_preservation_requirement(client):
     run_id, generation = ready_run(client)
     projection = aggregate([observation("positive", "record", "positive")], [], run_id)

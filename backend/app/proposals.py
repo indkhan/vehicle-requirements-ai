@@ -232,6 +232,17 @@ def validated_draft(
         )
     )
     cohorts = {cohort for finding in findings for cohort in finding.cohort_ids}
+    if draft.variants:
+        omitted = set(change_ids) - {
+            identifier
+            for variant in draft.variants
+            for identifier in variant.change_ids
+        }
+        if omitted:
+            raise ValueError(
+                f"Draft variants omit supported changes {sorted(omitted)}; "
+                "include every drafted change in at least one coherent variant"
+            )
     for index, variant in enumerate(draft.variants):
         if (
             not set(variant.change_ids) <= change_ids.keys()
