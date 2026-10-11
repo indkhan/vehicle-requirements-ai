@@ -371,6 +371,9 @@ def test_uncertain_proposal_timeout_is_not_automatically_repeated(client, monkey
         "uncertain",
         "oversize",
         "large_context",
+        "unlinked_gap",
+        "complete_repair",
+        "dropped_repair",
     ],
 )
 def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_call(
@@ -387,10 +390,10 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
     from test_ingestion_cache import feedback, frozen_run
 
     from app import proposals
-    from app.artifacts import get_stage
+    from app.artifacts import get_stage, put_stage
     from app.config import Settings
-    from app.db import EvidenceArtifact, RunEvidence, Session
-    from app.ingest_types import ContextMetric, ParseResult
+    from app.db import EvidenceArtifact, RunEvidence, Session, StageOutput
+    from app.ingest_types import ContextMetric, ParsedPassage, ParseResult
     from app.ingestion import publish_batch
 
     run_id, generation, version, binding = frozen_run(client)
@@ -433,6 +436,26 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         ),
         batch="study",
     )
+    if outcome == "unlinked_gap":
+        publish_batch(
+            run_id,
+            generation,
+            version,
+            ParseResult(
+                kind="equipment",
+                parser_revision=binding["parser_revision"],
+                passages=[
+                    ParsedPassage(
+                        source_kind="equipment",
+                        text="Related cabin package; applicability unknown.",
+                        locator=w.PDFLocator(page=1),
+                        scope=w.Scope(markets=["DE"]),
+                        attributes={"availability": "unknown"},
+                    )
+                ],
+            ),
+            batch="equipment",
+        )
     with Session() as session:
         artifacts = session.scalars(
             select(EvidenceArtifact)
@@ -443,6 +466,9 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         for item in artifacts:
             if item.source_kind == "study":
                 study_id = item.id
+                continue
+            if item.source_kind == "equipment":
+                document_id = item.id
                 continue
             positive = item.excerpt.startswith("I like")
             row = observation(
@@ -463,21 +489,36 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
     positive_id = next(
         row["evidence_id"] for row in rows if row["sentiment"] == "positive"
     )
-    from app.artifacts import put_stage as save_stage
-
-    save_stage(
+    put_stage(
         run_id,
         generation,
         "baselines",
         {
             "items": {
-                findings[0].finding_id: {
+                findings[-1 if outcome == "unlinked_gap" else 0].finding_id: {
                     "claims": [],
                     "context_evidence_ids": [study_id],
+                    **(
+                        {"claims": [{"evidence_id": document_id}]}
+                        if outcome == "unlinked_gap"
+                        else {}
+                    ),
                 },
             }
         },
     )
+    policy = get_stage(run_id, generation, "configuration")
+    frozen_catalog = policy.get("catalog") or proposals.catalog()
+    frozen_catalog = {
+        **frozen_catalog,
+        "baseline_asset": {"limitations": ["No verified mesh mappings"]},
+        "interior_reference": {"vehicle_id": "separate-reference-vehicle"},
+    }
+    with Session.begin() as session:
+        session.get(StageOutput, (run_id, generation, "configuration")).payload = {
+            **policy,
+            "catalog": frozen_catalog,
+        }
     calls = []
     review_count = 0
 
@@ -488,11 +529,40 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         if options["text_format"] is Review:
             review_count += 1
             data = json.loads(options["input"][1]["content"])
-            assert {e["evidence_id"] for e in data["evidence"]} == {
+            expected_evidence = {
                 negative_id,
                 positive_id,
                 study_id,
             }
+            if outcome == "unlinked_gap":
+                expected_evidence.add(document_id)
+                assert {f["finding_id"] for f in data["findings"]} == {
+                    f.finding_id for f in findings
+                }
+                assert data["catalog"] == frozen_catalog
+                assert data["assessed_claims"] == [
+                    {"finding_id": findings[-1].finding_id, "evidence_id": document_id}
+                ]
+                assert any(
+                    findings[-1].finding_id in gap for gap in data["draft"]["gaps"]
+                )
+                assert (
+                    "application-added uncovered-finding gaps"
+                    in options["input"][0]["content"]
+                )
+            assert {e["evidence_id"] for e in data["evidence"]} == expected_evidence
+            if outcome in {"complete_repair", "dropped_repair"}:
+                instructions = options["input"][0]["content"].casefold()
+                assert "self-contained" in instructions
+                assert "explicit geometry" in instructions
+                assert "conditions and validation" in instructions
+                if review_count == 2:
+                    assert len(data["previous_draft"]["changes"]) == 2
+                    assert len(data["previous_draft"]["variants"]) == 1
+                    assert any(
+                        change["outcome"] == "Preserve appreciated cabin layout"
+                        for change in data["previous_draft"]["changes"]
+                    )
             study = next(e for e in data["evidence"] if e["evidence_id"] == study_id)
             assert study["details"]["value"] == 0.3
             assert study["limitations"] == ["Unknown sample size"]
@@ -508,14 +578,18 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 )
             if outcome == "malformed" and review_count == 1:
                 return Review.model_validate_json('{"accepted":')
-            accepted = outcome in {"interrupted", "large_context"} or (
-                review_count == 2 and outcome != "rejected"
+            accepted = outcome in {"interrupted", "large_context", "unlinked_gap"} or (
+                review_count == 2 and outcome not in {"rejected", "dropped_repair"}
             )
             return SimpleNamespace(
                 output_parsed=Review(
                     accepted=accepted,
                     objections=[]
                     if accepted
+                    else [
+                        "Repair omitted a source-supported cabin-preservation change."
+                    ]
+                    if outcome == "dropped_repair" and review_count == 2
                     else [
                         "Remove generic cabin-layout praise from this console change's opposing_evidence_ids; it does not oppose the specific knee-clearance outcome."
                     ],
@@ -525,20 +599,45 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 id="review-response",
             )
         draft_count = calls.count(Draft)
+        if outcome in {"complete_repair", "dropped_repair"}:
+            instructions = options["input"][0]["content"].casefold()
+            assert "self-contained" in instructions
+            assert "explicit geometry" in instructions
+            assert "conditions and validation" in instructions
         if draft_count == 2:
             assert (
                 "opposing_evidence_ids" in options["input"][-1]["content"]
                 or "structured" in options["input"][-1]["content"]
                 or "input budget exhausted" in options["input"][-1]["content"]
             )
+            if outcome in {"complete_repair", "dropped_repair"}:
+                message = options["input"][-1]["content"].casefold()
+                assert "complete revised draft" in message
+                assert "unaffected" in message
+                assert "self-contained" in message
+                previous = json.loads(options["input"][-2]["content"])
+                assert [c["change_id"] for c in previous["changes"]] == ["C1", "C2"]
+                assert previous["variants"][0]["change_ids"] == ["C1", "C2"]
+                candidate = json.loads(
+                    options["input"][-1]["content"].split(
+                        "objections can be matched to its changes: ", 1
+                    )[1]
+                )
+                assert len(candidate["changes"]) == 2
+                assert all(
+                    c["change_id"] not in {"C1", "C2"} for c in candidate["changes"]
+                )
         change = sample().changes[0].model_dump()
         change.update(
             outcome="Improve center-console knee clearance",
             after="Validate a layout that accommodates the customer's knee",
-            finding_ids=[f.finding_id for f in findings],
+            finding_ids=[findings[0].finding_id]
+            if outcome == "unlinked_gap"
+            else [f.finding_id for f in findings],
             supporting_evidence_ids=[negative_id],
             opposing_evidence_ids=[positive_id]
-            if draft_count == 1 and outcome not in {"interrupted", "large_context"}
+            if draft_count == 1
+            and outcome not in {"interrupted", "large_context", "unlinked_gap"}
             else [],
             scope=w.Scope(markets=["DE"]).model_dump(),
             metric=None,
@@ -548,8 +647,33 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         )
         if outcome == "oversize":
             change["after"] = "x" * 320001
+        draft = {"changes": [change], "gaps": []}
+        if outcome in {"complete_repair", "dropped_repair"}:
+            change.update(change_id="C1", requirement_id="R1")
+            preserved = {
+                **change,
+                "change_id": "C2",
+                "requirement_id": "R2",
+                "outcome": "Preserve appreciated cabin layout",
+                "after": "Retain the appreciated overall cabin experience.",
+                "supporting_evidence_ids": [positive_id],
+                "opposing_evidence_ids": [],
+            }
+            if draft_count == 1 or outcome == "complete_repair":
+                draft["changes"].append(preserved)
+                draft["variants"] = [
+                    w.Variant(
+                        variant_id="V1",
+                        title="Compatible customer outcomes",
+                        cohort_ids=[],
+                        assumptions=[],
+                        change_ids=["C1", "C2"],
+                        requirement_ids=["R1", "R2"],
+                        related_variant_ids=[],
+                    ).model_dump()
+                ]
         return SimpleNamespace(
-            output_parsed=Draft.model_validate({"changes": [change], "gaps": []}),
+            output_parsed=Draft.model_validate(draft),
             model="synthetic",
             usage=None,
         )
@@ -593,20 +717,27 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         with pytest.raises(RuntimeError, match="Process stopped"):
             proposals.draft_changes(run_id, generation, findings, [])
     for _ in range(2):
-        if outcome == "rejected":
-            with pytest.raises(ValueError, match="generic cabin-layout praise"):
+        if outcome in {"rejected", "dropped_repair"}:
+            with pytest.raises(
+                ValueError,
+                match="omitted a source-supported"
+                if outcome == "dropped_repair"
+                else "generic cabin-layout praise",
+            ):
                 proposals.draft_changes(run_id, generation, findings, [])
         else:
             result = proposals.draft_changes(run_id, generation, findings, [])
             assert result.changes[0].opposing_evidence_ids == []
+            if outcome == "complete_repair":
+                assert len(result.changes) == 2 and len(result.variants) == 1
     assert calls == (
         [Draft, Review]
-        if outcome in {"interrupted", "large_context"}
+        if outcome in {"interrupted", "large_context", "unlinked_gap"}
         else [Draft, Review, Draft, Review]
     )
     reviewed = get_stage(run_id, generation, "proposal_semantic_review:0")
     assert reviewed is not None
-    assert reviewed["policy"]["prompt_revision"] == "proposal-review-v2"
+    assert reviewed["policy"]["prompt_revision"] == "proposal-review-v3"
     assert reviewed["policy"]["model"] == (
         None if outcome == "malformed" else "synthetic"
     )
