@@ -423,6 +423,11 @@ def test_baseline_inference_accepts_complete_scoped_context_but_remains_bounded(
             "positive",
         ),
         (
+            "ambient-lighting-praise",
+            "Customer stated that they really love the ambient lighting in the vehicle.",
+            "positive",
+        ),
+        (
             "roof-opening",
             "I wish the roof would open fully.",
             "negative",
@@ -439,6 +444,8 @@ def test_topic_index_preserves_unknown_needs_and_source_ambiguity(
         title="Neutral product observation",
         customer_need="No customer need or desired change is established by this source."
         if sentiment == "neutral"
+        else "The customer praises ambient lighting; no explicit preservation request is established."
+        if topic == "ambient-lighting-praise"
         else "Praise may suggest preserving wheel controls; their type and location are unknown."
         if sentiment == "positive"
         else "The desired outcome is full roof opening; current opening behavior is unknown.",
@@ -461,8 +468,17 @@ def test_topic_index_preserves_unknown_needs_and_source_ambiguity(
         }
     }
     attempts = []
+    if topic == "ambient-lighting-praise":
+        description = Observation.model_json_schema()["properties"]["customer_need"][
+            "description"
+        ].casefold()
+        assert "positive and neutral" in description
+        assert "explicitly tentative" in description
 
     def call(schema, instructions, data, policy):
+        if topic == "ambient-lighting-praise":
+            assert "positive and neutral" in instructions.casefold()
+            assert "explicitly tentative" in instructions.casefold()
         if schema is module.Reconciliation:
             assert data["new"][topic] == descriptor
             return module.Reconciliation(
