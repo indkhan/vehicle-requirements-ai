@@ -2,7 +2,7 @@ from threading import Barrier, Event, Lock
 
 import httpx
 import pytest
-from openai import APITimeoutError
+from openai import APIConnectionError, APITimeoutError
 
 from app import findings as module
 from app import wire as w
@@ -101,6 +101,120 @@ def test_failed_batches_split_and_resume_without_losing_evidence(monkeypatch, fa
     assert module.extract_findings(["run", "generation"]) == "ready"
     assert extraction_sizes == []
     assert stages["findings"]["counts"]["total_records"] == 4
+
+
+@pytest.mark.parametrize(
+    "outcome", ["connection", "oversize", "source_warning", "disposition"]
+)
+def test_incomplete_extraction_blocks_downstream_but_retains_completed_work(
+    monkeypatch, outcome
+):
+    evidence = [
+        {
+            "evidence_id": str(index),
+            "record_id": str(index),
+            "source_kind": "feedback",
+            "excerpt": "Synthetic seat comfort",
+            "scope": w.Scope(markets=["DE"], cohort_ids=["DE"]).model_dump(),
+            "limitations": [],
+        }
+        for index in range(2)
+    ]
+    if outcome == "oversize":
+        evidence[1]["excerpt"] = "x" * module.MAX_BATCH_CHARACTERS
+    if outcome == "source_warning":
+        evidence[1]["limitations"] = ["Uncertain source scope"]
+    if outcome == "disposition":
+        evidence[1]["excerpt"] = "Survey submission received."
+    policy = {
+        "model": "synthetic-model",
+        "prompt_revision": module.PROMPT_REVISION,
+        "schema_revision": module.PROMPT_REVISION,
+        "ai_batch_size": 1,
+        "catalog": {"parts": [{"part_id": "part_seat"}]},
+    }
+    stages, calls = {}, []
+    monkeypatch.setattr(
+        module, "Settings", lambda: Settings(openai_api_key="synthetic")
+    )
+    monkeypatch.setattr(module, "_current_generation", lambda *args: True)
+    monkeypatch.setattr(module, "_inputs", lambda *args: (policy, evidence, {}))
+    monkeypatch.setattr(module, "get_stage", lambda run, gen, key: stages.get(key))
+    monkeypatch.setattr(
+        module,
+        "put_stage",
+        lambda run, gen, key, payload, **kw: stages.update({key: payload}),
+    )
+
+    def call(schema, instructions, data, frozen):
+        calls.append(schema)
+        if schema is module.Extraction:
+            eid = data["evidence"][0]["evidence_id"]
+            if eid == "1" and outcome == "connection":
+                raise APIConnectionError(
+                    request=httpx.Request("POST", "https://synthetic.invalid")
+                )
+            if eid == "1" and outcome == "disposition":
+                return module.Extraction(
+                    observations=[],
+                    dispositions=[
+                        Disposition(evidence_id=eid, reason="no_product_observation")
+                    ],
+                ), {}
+            row = observation(eid, eid)
+            return module.Extraction(
+                observations=[
+                    Observation.model_validate(
+                        {
+                            key: value
+                            for key, value in row.items()
+                            if key not in {"record_id", "scope", "observation_id"}
+                        }
+                    )
+                ],
+                dispositions=[],
+            ), {}
+        if schema is module.Reconciliation:
+            return module.Reconciliation(
+                links=[
+                    module.TopicLink(
+                        topic_key="seat-comfort",
+                        canonical_key="seat-comfort",
+                        basis="Same customer task",
+                    )
+                ]
+                if data["new"]
+                else []
+            ), {}
+        return module.Review(accepted=True, objections=[]), {}
+
+    monkeypatch.setattr(module, "_call", call)
+    expected = (
+        "failed"
+        if outcome in {"connection", "oversize"}
+        else "partial"
+        if outcome == "source_warning"
+        else "ready"
+    )
+    assert module.extract_findings(["run", "generation"]) == expected
+    result = stages["findings"]
+    assert result["observations"][0]["evidence_id"] == "0"
+    assert result["input_record_ids"] == ["0", "1"]
+    assert result["counts"]["total_records"] == (
+        2 if outcome == "source_warning" else 1
+    )
+    if outcome in {"connection", "oversize"}:
+        assert any(
+            item.startswith(
+                "ai_extraction_batch_failed:"
+                if outcome == "connection"
+                else "feedback_exceeds_model_batch_limit:"
+            )
+            for item in result["coverage"]
+        )
+    initial_calls = list(calls)
+    assert module.extract_findings(["run", "generation"]) == expected
+    assert calls == initial_calls
 
 
 def observation(evidence, record, sentiment="negative", parts=None, cohorts=None):

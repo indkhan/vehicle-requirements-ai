@@ -736,7 +736,12 @@ def extract_findings(args: list[str]) -> str:
     output["input_record_ids"] = sorted(
         {item["record_id"] for item in feedback if item["record_id"]}
     )
-    if not observations:
+    if not observations or any(
+        item.startswith(
+            ("ai_extraction_batch_failed:", "feedback_exceeds_model_batch_limit:")
+        )
+        for item in coverage
+    ):
         output["status"] = "failed"
     if not _current_generation(run_id, generation):
         return "superseded"
