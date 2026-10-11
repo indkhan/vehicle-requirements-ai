@@ -414,6 +414,8 @@ def test_uncertain_proposal_timeout_is_not_automatically_repeated(client, monkey
         "unlinked_gap",
         "complete_repair",
         "dropped_repair",
+        "structural_repair",
+        "structural_dropped",
     ],
 )
 def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_call(
@@ -591,7 +593,12 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                     in options["input"][0]["content"]
                 )
             assert {e["evidence_id"] for e in data["evidence"]} == expected_evidence
-            if outcome in {"complete_repair", "dropped_repair"}:
+            if outcome in {
+                "complete_repair",
+                "dropped_repair",
+                "structural_repair",
+                "structural_dropped",
+            }:
                 instructions = options["input"][0]["content"].casefold()
                 assert "self-contained" in instructions
                 assert "explicit geometry" in instructions
@@ -603,6 +610,12 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                         change["outcome"] == "Preserve appreciated cabin layout"
                         for change in data["previous_draft"]["changes"]
                     )
+                if outcome in {"structural_repair", "structural_dropped"}:
+                    prior = data["previous_draft"]["changes"]
+                    assert [change["change_id"] for change in prior] == ["C1", "C2"]
+                    assert prior[0]["scope"]["markets"] == ["CN"]
+                    assert prior[1]["scope"]["markets"] == ["DE"]
+                    assert "may be structurally invalid" in instructions
             study = next(e for e in data["evidence"] if e["evidence_id"] == study_id)
             assert study["details"]["value"] == 0.3
             assert study["limitations"] == ["Unknown sample size"]
@@ -618,8 +631,14 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 )
             if outcome == "malformed" and review_count == 1:
                 return Review.model_validate_json('{"accepted":')
-            accepted = outcome in {"interrupted", "large_context", "unlinked_gap"} or (
-                review_count == 2 and outcome not in {"rejected", "dropped_repair"}
+            accepted = outcome in {
+                "interrupted",
+                "large_context",
+                "unlinked_gap",
+                "structural_repair",
+            } or (
+                review_count == 2
+                and outcome not in {"rejected", "dropped_repair", "structural_dropped"}
             )
             return SimpleNamespace(
                 output_parsed=Review(
@@ -629,7 +648,8 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                     else [
                         "Repair omitted a source-supported cabin-preservation change."
                     ]
-                    if outcome == "dropped_repair" and review_count == 2
+                    if outcome == "structural_dropped"
+                    or (outcome == "dropped_repair" and review_count == 2)
                     else [
                         "Remove generic cabin-layout praise from this console change's opposing_evidence_ids; it does not oppose the specific knee-clearance outcome."
                     ],
@@ -639,7 +659,12 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 id="review-response",
             )
         draft_count = calls.count(Draft)
-        if outcome in {"complete_repair", "dropped_repair"}:
+        if outcome in {
+            "complete_repair",
+            "dropped_repair",
+            "structural_repair",
+            "structural_dropped",
+        }:
             instructions = options["input"][0]["content"].casefold()
             assert "self-contained" in instructions
             assert "explicit geometry" in instructions
@@ -649,8 +674,14 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 "opposing_evidence_ids" in options["input"][-1]["content"]
                 or "structured" in options["input"][-1]["content"]
                 or "input budget exhausted" in options["input"][-1]["content"]
+                or "scope is not established" in options["input"][-1]["content"]
             )
-            if outcome in {"complete_repair", "dropped_repair"}:
+            if outcome in {
+                "complete_repair",
+                "dropped_repair",
+                "structural_repair",
+                "structural_dropped",
+            }:
                 message = options["input"][-1]["content"].casefold()
                 assert "complete revised draft" in message
                 assert "unaffected" in message
@@ -658,15 +689,22 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 previous = json.loads(options["input"][-2]["content"])
                 assert [c["change_id"] for c in previous["changes"]] == ["C1", "C2"]
                 assert previous["variants"][0]["change_ids"] == ["C1", "C2"]
+                assert (
+                    "objections can be matched to its changes: "
+                    in options["input"][-1]["content"]
+                )
                 candidate = json.loads(
                     options["input"][-1]["content"].split(
                         "objections can be matched to its changes: ", 1
                     )[1]
                 )
                 assert len(candidate["changes"]) == 2
-                assert all(
-                    c["change_id"] not in {"C1", "C2"} for c in candidate["changes"]
-                )
+                if outcome in {"structural_repair", "structural_dropped"}:
+                    assert candidate["changes"] == previous["changes"]
+                else:
+                    assert all(
+                        c["change_id"] not in {"C1", "C2"} for c in candidate["changes"]
+                    )
         change = sample().changes[0].model_dump()
         change.update(
             outcome="Improve center-console knee clearance",
@@ -677,7 +715,14 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
             supporting_evidence_ids=[negative_id],
             opposing_evidence_ids=[positive_id]
             if draft_count == 1
-            and outcome not in {"interrupted", "large_context", "unlinked_gap"}
+            and outcome
+            not in {
+                "interrupted",
+                "large_context",
+                "unlinked_gap",
+                "structural_repair",
+                "structural_dropped",
+            }
             else [],
             scope=w.Scope(markets=["DE"]).model_dump(),
             metric=None,
@@ -688,7 +733,12 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         if outcome == "oversize":
             change["after"] = "x" * 320001
         draft = {"changes": [change], "gaps": []}
-        if outcome in {"complete_repair", "dropped_repair"}:
+        if outcome in {
+            "complete_repair",
+            "dropped_repair",
+            "structural_repair",
+            "structural_dropped",
+        }:
             change.update(change_id="C1", requirement_id="R1")
             preserved = {
                 **change,
@@ -699,7 +749,7 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                 "supporting_evidence_ids": [positive_id],
                 "opposing_evidence_ids": [],
             }
-            if draft_count == 1 or outcome == "complete_repair":
+            if draft_count == 1 or outcome in {"complete_repair", "structural_repair"}:
                 draft["changes"].append(preserved)
                 draft["variants"] = [
                     w.Variant(
@@ -712,6 +762,11 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
                         related_variant_ids=[],
                     ).model_dump()
                 ]
+            if draft_count == 1 and outcome in {
+                "structural_repair",
+                "structural_dropped",
+            }:
+                change["scope"] = w.Scope(markets=["CN"]).model_dump()
         return SimpleNamespace(
             output_parsed=Draft.model_validate(draft),
             model="synthetic",
@@ -757,25 +812,32 @@ def test_semantic_proposal_review_repairs_false_opposition_and_checkpoints_each_
         with pytest.raises(RuntimeError, match="Process stopped"):
             proposals.draft_changes(run_id, generation, findings, [])
     for _ in range(2):
-        if outcome in {"rejected", "dropped_repair"}:
+        if outcome in {"rejected", "dropped_repair", "structural_dropped"}:
             with pytest.raises(
                 ValueError,
                 match="omitted a source-supported"
-                if outcome == "dropped_repair"
+                if outcome in {"dropped_repair", "structural_dropped"}
                 else "generic cabin-layout praise",
             ):
                 proposals.draft_changes(run_id, generation, findings, [])
         else:
             result = proposals.draft_changes(run_id, generation, findings, [])
             assert result.changes[0].opposing_evidence_ids == []
-            if outcome == "complete_repair":
+            if outcome in {"complete_repair", "structural_repair"}:
                 assert len(result.changes) == 2 and len(result.variants) == 1
     assert calls == (
         [Draft, Review]
         if outcome in {"interrupted", "large_context", "unlinked_gap"}
+        else [Draft, Draft, Review]
+        if outcome in {"structural_repair", "structural_dropped"}
         else [Draft, Review, Draft, Review]
     )
-    reviewed = get_stage(run_id, generation, "proposal_semantic_review:0")
+    reviewed = get_stage(
+        run_id,
+        generation,
+        "proposal_semantic_review:"
+        + ("1" if outcome in {"structural_repair", "structural_dropped"} else "0"),
+    )
     assert reviewed is not None
     assert reviewed["policy"]["prompt_revision"] == "proposal-review-v3"
     assert reviewed["policy"]["model"] == (
