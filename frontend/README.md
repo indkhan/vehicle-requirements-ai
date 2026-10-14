@@ -33,6 +33,23 @@ npm run typecheck
 npm run build
 ```
 
+## Portfolio Phase 0 checks
+
+Frontend CI runs installation, the complete unit/HTTP-contract suite with two workers, typecheck, production build, and a Chromium browser smoke on desktop and mobile. Reproduce its checks with:
+
+```sh
+npm ci
+npm test -- --maxWorkers=2
+npm run typecheck
+npm run build
+npx playwright install chromium
+npm run test:smoke
+```
+
+The smoke uses separate development-only HTTP harness servers on loopback ports 5189 and 5190, public fixture access, and independent state for each viewport. It never reuses an existing server and blocks external browser requests. The synthetic upload bytes exercise file interaction only; they are not parsed or analyzed. It verifies the supported collection-to-workshop path, source inspection, decision-note validation, decision/history, exact-version JSON export and reload, plus the unsupported-trim guard. External 3D intentionally falls back to the local preview.
+
+The existing opt-in live browser configuration excludes these smoke tests. Smoke requires no backend, credentials, provider calls, or private geometry. Failed CI smoke runs retain screenshots, traces and the HTML report for seven days. See the [Phase 0 baseline](../doc/portfolio/PHASE0_BASELINE.md), [flagship source plan](../doc/portfolio/FLAGSHIP_SCENARIO.md), and [evaluation rubric](../doc/portfolio/EVALUATION_RUBRIC.md).
+
 Copy `.env.example` to `.env.local` as needed. No secrets are needed for mock mode. The development server binds to `127.0.0.1:5173` by default.
 
 - `VITE_API_MODE=mock`: explicit synthetic wire fixtures, never analysis of uploaded contents. `npm run dev:mock` selects this mode. Refresh starts a new mock session. Published upload formats are XLSX/PDF; unsupported formats yield per-file rejection. Duplicate bytes share a synthetic source ID.

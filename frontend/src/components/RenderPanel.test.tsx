@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import RenderPanel from "./RenderPanel";
+import type { RenderPanelProps } from "./RenderPanel";
 import type { Api, Workspace } from "../api/contracts";
 import type * as Wire from "../api/wire";
 import * as normalize from "../api/normalize";
@@ -43,10 +44,40 @@ function workspace(version = 1): Workspace {
     history: [],
   };
 }
+// The workspace owns the Reimagine button and signals its action through this
+// public prop. Keep component tests independent of the workspace toolbar.
+function renderPanel(initialProps: RenderPanelProps) {
+  let currentProps = initialProps;
+  let createRequest = initialProps.createRequest ?? 0;
+  const view = render(
+    <RenderPanel {...currentProps} createRequest={createRequest} />,
+  );
+  return {
+    ...view,
+    rerender(nextProps: RenderPanelProps) {
+      currentProps = nextProps;
+      view.rerender(
+        <RenderPanel {...currentProps} createRequest={createRequest} />,
+      );
+    },
+    requestRender() {
+      act(() => {
+        createRequest++;
+        view.rerender(
+          <RenderPanel {...currentProps} createRequest={createRequest} />,
+        );
+      });
+    },
+  };
+}
 it("requires saving or discarding edits before Reimagine", () => {
-  render(<RenderPanel api={{ mode: "mock" } as Api} workspace={workspace()} variantId="variant-digital" hasUnsavedWork onRefresh={async () => workspace()} onOpen={() => {}} />);
-  expect(screen.getByRole("button", { name: "Reimagine" })).toBeDisabled();
-  expect(screen.getByText(/Save or discard unsaved edits/)).toBeVisible();
+  const { api, request } = service();
+  const view = renderPanel({ ...props(api), hasUnsavedWork: true });
+  view.requestRender();
+  expect(request).not.toHaveBeenCalled();
+  expect(
+    screen.getByText("No render requested for this proposal set."),
+  ).toBeVisible();
 });
 function result(
   id = "job-1",
@@ -95,8 +126,8 @@ it("keeps measured dimensions and review limitations in expandable render detail
     if (path.endsWith("/renders") && body) return { resource_id: "job-1" };
     if (path.includes("/renders/")) return value;
   });
-  render(<RenderPanel {...props(api)} />);
-  await userEvent.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   const details = await screen.findByText("Change 1 details");
   expect(details.closest("details")).not.toHaveAttribute("open");
   await userEvent.click(details);
@@ -155,8 +186,9 @@ function props(api: Api, w = workspace()) {
 it("creates one exact-version render and binds assets to outcomes and numbered change identities", async () => {
   const user = userEvent.setup();
   const { api, request } = service();
-  render(<RenderPanel {...props(api)} />);
-  await user.dblClick(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
+  view.requestRender();
   const assets = await screen.findByRole("region", {
     name: "Current render assets",
   });
@@ -199,8 +231,8 @@ it("polls queued then rendering then partial without overlapping requests", asyn
       return result("job-1", 1, reads === 2 ? "rendering" : "partial");
     }
   });
-  render(<RenderPanel {...props(api)} />);
-  fireEvent.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   await act(async () => {});
   await act(() => vi.advanceTimersByTimeAsync(6000));
   expect(reads).toBe(1);
@@ -223,8 +255,8 @@ it("retains accepted job ID after retrieval fails and retries retrieval without 
     if (body === undefined && path.includes("/renders/") && ++reads === 1)
       throw new Error("Status offline");
   });
-  render(<RenderPanel {...props(api)} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   expect(await screen.findByRole("alert")).toHaveTextContent("Status offline");
   await user.click(
     screen.getByRole("button", { name: "Retry render status job-1" }),
@@ -235,21 +267,19 @@ it("retains accepted job ID after retrieval fails and retries retrieval without 
   ).toHaveLength(1);
 });
 it("rejects result identity mismatches before displaying any assets", async () => {
-  const user = userEvent.setup();
   const { api } = service(async (path, body) =>
     body === undefined && path.includes("/renders/")
       ? result("other-job", 2)
       : undefined,
   );
-  render(<RenderPanel {...props(api)} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   expect(await screen.findByRole("alert")).toHaveTextContent(/identity/);
   expect(
     screen.queryByRole("link", { name: /Open variant asset/ }),
   ).not.toBeInTheDocument();
 });
 it("keeps late old renders separate from current-version assets and fetches immutable earlier proposals", async () => {
-  const user = userEvent.setup();
   let finish!: (value: unknown) => void;
   const { api, request } = service(async (path, body) => {
     if (body !== undefined && path.endsWith("/renders")) {
@@ -267,10 +297,10 @@ it("keeps late old renders separate from current-version assets and fetches immu
     if (path.endsWith("/renders/job-2")) return result("job-2", 2);
   });
   const base = { ...props(api), compact: true };
-  const { rerender } = render(<RenderPanel {...base} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
-  rerender(<RenderPanel {...base} workspace={workspace(2)} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(base);
+  view.requestRender();
+  view.rerender({ ...base, workspace: workspace(2) });
+  view.requestRender();
   await screen.findByRole("link", { name: "Open variant asset asset-2" });
   await act(async () => finish(result("job-1", 1)));
   const current = screen.getByRole("region", { name: "Current render assets" });
@@ -299,8 +329,8 @@ it("uses the existing retry endpoint for failed jobs and preserves original bind
       };
     if (path.endsWith("/renders/job-retry")) return result("job-retry");
   });
-  render(<RenderPanel {...props(api)} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   await user.click(
     await screen.findByRole("button", { name: "Retry render job-1" }),
   );
@@ -324,11 +354,11 @@ it("recovers an uncertain render submission after real-mode reload with identica
       throw new TypeError("Interrupted POST");
   }, "real");
   const p = props(api);
-  const { unmount } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(p);
+  view.requestRender();
   await screen.findByRole("alert");
-  unmount();
-  render(<RenderPanel {...p} />);
+  view.unmount();
+  renderPanel(p);
   await user.click(
     screen.getByRole("button", { name: /Retry render submission/ }),
   );
@@ -337,32 +367,32 @@ it("recovers an uncertain render submission after real-mode reload with identica
   expect(commands[1]).toEqual(commands[0]);
 });
 it("restores accepted real-mode job tracking without submitting another render", async () => {
-  const user = userEvent.setup();
   const { api, request } = service(undefined, "real");
   const p = props(api);
-  const { unmount } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(p);
+  view.requestRender();
   await screen.findByRole("region", { name: "Current render assets" });
-  unmount();
-  render(<RenderPanel {...p} />);
+  view.unmount();
+  renderPanel(p);
   await screen.findByRole("region", { name: "Current render assets" });
   expect(
     request.mock.calls.filter(([, body]) => body !== undefined),
   ).toHaveLength(1);
 });
 it("honors backend actions and never substitutes a missing selected variant", () => {
-  const { api } = service();
+  const { api, request } = service();
   const w = workspace();
   w.snapshot.available_actions = [];
   const p = props(api, w);
-  const { rerender } = render(<RenderPanel {...p} />);
-  expect(screen.getByRole("button", { name: "Reimagine" })).toBeDisabled();
-  rerender(<RenderPanel {...p} workspace={workspace()} variantId="missing" />);
-  expect(screen.getByRole("button", { name: "Reimagine" })).toBeDisabled();
+  const view = renderPanel(p);
+  view.requestRender();
+  expect(request).not.toHaveBeenCalled();
+  view.rerender({ ...p, workspace: workspace(), variantId: "missing" });
+  view.requestRender();
+  expect(request).not.toHaveBeenCalled();
   expect(screen.getByText(/Selected variant unavailable/)).toBeInTheDocument();
 });
 it("discards late accepted submission and stops polling after unmount", async () => {
-  const user = userEvent.setup();
   let finish!: (value: unknown) => void;
   const { api } = service(async (_path, body) =>
     body !== undefined
@@ -372,9 +402,9 @@ it("discards late accepted submission and stops polling after unmount", async ()
       : undefined,
   );
   const p = props(api);
-  const { unmount } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
-  unmount();
+  const view = renderPanel(p);
+  view.requestRender();
+  view.unmount();
   await act(async () =>
     finish({
       command_id: "late",
@@ -392,11 +422,11 @@ it("keeps an uncertain mock command across remount using the same API instance",
       throw new Error("Uncertain acknowledgement");
   });
   const p = props(api);
-  const { unmount } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(p);
+  view.requestRender();
   await screen.findByRole("alert");
-  unmount();
-  render(<RenderPanel {...p} />);
+  view.unmount();
+  renderPanel(p);
   await user.click(
     screen.getByRole("button", { name: /Retry render submission/ }),
   );
@@ -406,7 +436,6 @@ it("keeps an uncertain mock command across remount using the same API instance",
   ).toEqual(request.mock.calls.filter(([, body]) => body !== undefined)[0]);
 });
 it("resolves returned root-relative assets against the API origin", async () => {
-  const user = userEvent.setup();
   const { api } = service(async (path, body) => {
     if (body === undefined && path.includes("/renders/")) {
       const value = result();
@@ -415,8 +444,8 @@ it("resolves returned root-relative assets against the API origin", async () => 
     }
   });
   api.linkUrl = (value) => new URL(value, "https://backend.example").href;
-  render(<RenderPanel {...props(api)} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(props(api));
+  view.requestRender();
   expect(
     await screen.findByRole("link", { name: "Open variant asset asset-1" }),
   ).toHaveAttribute("href", "https://backend.example/private/render.png");
@@ -424,7 +453,7 @@ it("resolves returned root-relative assets against the API origin", async () => 
 it("offers numbered explanations before any render and focuses their exact change", async () => {
   const user = userEvent.setup();
   const { api } = service();
-  render(<RenderPanel {...props(api)} />);
+  renderPanel(props(api));
   await user.click(
     screen.getByRole("button", { name: "Explain change 1 change-dashboard" }),
   );
@@ -451,10 +480,10 @@ it("permits a failed earlier-version job retry without rebinding it to the new p
       return result("job-old-retry", 1);
   });
   const p = props(api);
-  const { rerender } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(p);
+  view.requestRender();
   await screen.findByText("failed");
-  rerender(<RenderPanel {...p} workspace={workspace(2)} />);
+  view.rerender({ ...p, workspace: workspace(2) });
   await user.click(screen.getByRole("button", { name: "Retry render job-1" }));
   await screen.findByRole("region", { name: "Render job job-old-retry" });
   expect(request).toHaveBeenCalledWith(
@@ -467,18 +496,17 @@ it("permits a failed earlier-version job retry without rebinding it to the new p
   ).not.toBeInTheDocument();
 });
 it("aborts owned status reads when switching to another run", async () => {
-  const user = userEvent.setup();
   const { api, request } = service();
   const p = props(api);
-  const { rerender } = render(<RenderPanel {...p} />);
-  await user.click(screen.getByRole("button", { name: "Reimagine" }));
+  const view = renderPanel(p);
+  view.requestRender();
   await screen.findByRole("region", { name: "Current render assets" });
   const read = request.mock.calls.find(
     ([path, body]) => path.includes("/renders/") && body === undefined,
   ) as unknown as [string, unknown, unknown, AbortSignal];
   const next = workspace();
   next.snapshot.run_id = "other-run";
-  rerender(<RenderPanel {...p} workspace={next} />);
+  view.rerender({ ...p, workspace: next });
   expect(read[3].aborted).toBe(true);
   expect(
     screen.queryByRole("region", { name: "Render job job-1" }),
@@ -493,8 +521,8 @@ it("recovers a failed variant preview by retrieving authorized asset links witho
       return next;
     }
   });
-  render(<RenderPanel {...props(api)} />);
-  await user.click(screen.getByRole('button',{name:'Reimagine'}));
+  const view = renderPanel(props(api));
+  view.requestRender();
   const assets = await screen.findByRole('region',{name:'Current render assets'});
   const image = within(assets).getByRole('img');
   expect(image).toHaveAttribute('src','https://assets.example/expired.png');

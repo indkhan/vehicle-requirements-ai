@@ -5,6 +5,8 @@ AI-assisted vehicle requirements planning: turn customer feedback and market evi
 
 [Full product, architecture, and hackathon implementation plan](doc/BMW_AI_Requirements_Full_Plan.md)
 
+Portfolio development follows the [phased implementation roadmap](doc/PORTFOLIO_IMPLEMENTATION_PLAN.md). The [Phase 0 baseline](doc/portfolio/PHASE0_BASELINE.md) records fresh verification, frontend CI, the flagship scenario and the evaluation boundary.
+
 The plan covers eight solution approaches, a reusable vehicle and market strategy, the complete evidence-to-decision pipeline, prioritization, PM review, audit history, four implementation phases, synthetic sample requirements, and a six-minute demonstration script.
 
 ## Run the connected application
