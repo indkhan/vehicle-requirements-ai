@@ -73,3 +73,17 @@ def test_history_has_scoped_pagination_and_actor_identity(client):
         ).status_code
         == 404
     )
+
+
+def test_history_cursor_from_another_run_is_rejected(client):
+    run_id, _, _, _ = frozen_run(client)
+    other_run_id, _, _, _ = frozen_run(client)
+    other_history = client.get(f"/api/v1/runs/{other_run_id}/history")
+    assert other_history.status_code == 200
+    other_cursor = other_history.json()["items"][0]["audit_id"]
+
+    response = client.get(
+        f"/api/v1/runs/{run_id}/history", params={"cursor": other_cursor}
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_cursor"

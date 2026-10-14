@@ -90,6 +90,19 @@ function requestError(error: unknown): string {
     .filter(Boolean)
     .join(" — ");
 }
+function analysisWarning(warning: string): string {
+  if (warning.includes("ai_extraction_batch_failed"))
+    return "AI could not finish processing a feedback batch.";
+  if (warning.includes("ai_credentials_unavailable"))
+    return "AI analysis is unavailable because its provider is not configured.";
+  if (warning.includes("pdf_parser_limit"))
+    return "Some document pages exceeded the parsing limit.";
+  if (warning.includes("ambiguous_table_cell"))
+    return "Some document table values remain uncertain.";
+  if (warning.includes("unresolved_footnote"))
+    return "Some equipment conditions could not be linked to their footnotes.";
+  return warning;
+}
 const spatialPartIds = new Set<string>([
   "body",
   "lighting",
@@ -982,6 +995,20 @@ function WorkspaceApp({
                 {pendingRun ? "Retry new analysis" : "Start new analysis with existing files"}
               </button>
             </div>
+          )}
+          {!!run?.warnings.length && (
+            <details
+              open={run.analysis_status === "failed"}
+              aria-label="Analysis warnings"
+              className="notice analysis-warnings"
+            >
+              <summary>Analysis warnings ({run.warnings.length})</summary>
+              <ul>
+                {run.warnings.map(warning => (
+                  <li key={warning}>{analysisWarning(warning)}</li>
+                ))}
+              </ul>
+            </details>
           )}
           {runId && !run && <p role="status">Recovering saved analysis…</p>}
         </section>

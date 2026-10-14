@@ -475,7 +475,13 @@ describe("frontend plan workspace", () => {
     const user = await createRun();
     await chooseView(user, "Proposals");
     await user.type(screen.getByLabelText("Proposal text"), " Unsaved detail");
+    expect(screen.getByRole("button", { name: "Reimagine" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reimagine" })).toHaveAttribute(
+      "title",
+      "Save or discard unsaved edits before Reimagine. Only selected saved suggestions are used.",
+    );
     await chooseView(user, "Evidence");
+    expect(screen.getByRole("button", { name: "Reimagine" })).toBeDisabled();
     const unsavedExit = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unsavedExit);
     expect(unsavedExit.defaultPrevented).toBe(true);
@@ -484,6 +490,7 @@ describe("frontend plan workspace", () => {
     await screen.findByText(/Waiting for backend recomputation/);
     await user.click(screen.getByRole("button", { name: "Refresh proposals" }));
     await screen.findByRole("heading", { name: "Proposals / version 2" });
+    expect(screen.getByRole("button", { name: "Reimagine" })).toBeEnabled();
     await waitFor(() => {
       const savedExit = new Event("beforeunload", { cancelable: true });
       window.dispatchEvent(savedExit);
